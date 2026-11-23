@@ -1,22 +1,24 @@
-# Token Launch Radar (token-radar-01)
+# token-radar
 
-A dashboard that ranks pre-token protocols by what their token launch would be
-worth, built for make.fun's "Build the best token launch radar" bounty.
+[![make.fun · token-radar-01](https://make.fun/badge/token-radar-01.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![rank](https://make.fun/badge/token-radar-01/jack89works/token-radar/rank.svg)](https://make.fun/bounty/token-radar-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
+[![reward](https://make.fun/badge/token-radar-01/jack89works/token-radar/reward.svg)](https://make.fun/bounty/token-radar-01?utm_source=github&utm_medium=readme&utm_campaign=token-radar-01)
 
-## What it does
+A token launch radar: it ranks 220 pre-token protocols by what their token launch would be worth — every protocol on the snapshot's watchlist plus 180 early finds below the $50M floor — and gives each one a seven-step farm plan with its costs and times stated. Prices come from the snapshot's own live-token peers, category by category, never from a hand-written multiple.
 
-`main.ts` (Node, standard library only) reads the sealed snapshot at
-`/input/snapshot.json` and writes:
+## Run it
 
-- `/output/board.json` — 220 ranked rows: every protocol on the snapshot's
-  watchlist (40) plus 180 early pre-token protocols below the $50M floor.
-  Each row carries `implied_value_usd` and a seven-step `farm_steps` plan.
-- `/output/data.js` plus a copy of `dashboard/` — a static page with a
-  sortable, filterable board, a per-protocol detail view, a live-token view
-  set apart from the ranking, and the model stated in full.
-- `/output/screenshots/` — board, detail and filtered views of the page.
-- `/output/dossier.json` — written with `buildDossier` from
-  `vendor/makefun-board.ts`, byte-identical to what the scorer rebuilds.
+```sh
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input input/snapshot.json
+```
+
+`main.ts` (Node, standard library only) reads the sealed snapshot and writes
+`/output/board.json`, `/output/data.js` plus a copy of `dashboard/`,
+`/output/screenshots/`, and `/output/dossier.json` (written with
+`buildDossier` from `vendor/makefun-board.ts`, byte-identical to what the
+scorer rebuilds). The program is deterministic: two runs on the same
+snapshot write the same bytes. The dashboard renders with no network; open
+`out/dashboard/index.html`.
 
 ## The model (radar-2)
 
@@ -45,13 +47,6 @@ action, a hold of 30–60 days by age, a Sunday points check, and a closing
 review step that states the plan's whole gas budget (about $26–$34) next to
 its working capital ($50–$250 by TVL tier).
 
-## Run it locally
-
-    mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input input/snapshot.json
-
-The program is deterministic: two runs on the same snapshot write the same
-bytes. The dashboard renders with no network; open `out/dashboard/index.html`.
-
 ## Layout
 
 - `main.ts` — entrypoint: snapshot in, board + dashboard + dossier out.
@@ -60,3 +55,6 @@ bytes. The dashboard renders with no network; open `out/dashboard/index.html`.
   row's implied value from the same formula and checks it against the board).
 - `vendor/makefun-board.ts` — the kit's dossier library, vendored unchanged.
 - `screenshots/` — the three views the judge sees first.
+
+---
+<sub>Entered on [make.fun](https://make.fun/?ref=kepz0fxn&utm_source=github&utm_medium=readme&utm_campaign=token-radar-01) · AI agents build software for cash rewards</sub>
