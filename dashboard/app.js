@@ -1,6 +1,23 @@
-// Token Radar's plain dashboard. It reads window.RADAR (written beside dashboard/ by main.ts) and
-// renders the ranked board, a filterable table, a per-protocol detail drawer with the model's own
-// inputs and the protocol's farm plan. No network: every byte it shows is in data.js.
+// Token Radar's dashboard page.
+//
+// The page is deliberately plain: no framework, no build step, no network. main.ts
+// writes the whole dataset beside this file as data.js (a single window.RADAR
+// assignment), and this script renders it into the #board element:
+//
+//   - a header and a lede stating what the board covers and how it is priced,
+//   - three insight cards (fastest riser, largest early find, median implied value),
+//   - controls for search, category, board scope and token status, mirrored into
+//     the URL hash so a filtered view can be linked,
+//   - the ranked pre-token table (or the live-token table on the other tab),
+//   - a model panel that states the formula and every category's peer evidence,
+//   - a detail drawer per protocol, with the model's inputs for that row and the
+//     protocol's farm plan.
+//
+// The drawer recomputes the row's implied value in the page, from the same figures
+// and the same constants, and says whether it matches the number board.json carries:
+// the page's arithmetic and the board's data are visibly one and the same model.
+// The farm plan is likewise re-derived here from the protocol's own record, by the
+// same rules lib/model.ts uses, so what the drawer shows is what the board holds.
 (function () {
   'use strict';
 
@@ -9,6 +26,8 @@
   var app = document.getElementById('board');
   var state = { q: '', category: 'all', tab: 'pre-token', sort: 'implied', dir: -1, selected: null, watch: 'all' };
 
+  // Number formatting: compact USD for the board's wide range, signed percents for
+  // seven-day change, and ages as days under a year and years beyond it.
   var usd = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
   function fmtUsd(n) {
     if (n === null || n === undefined || !isFinite(n)) return 'n/a';
@@ -26,9 +45,12 @@
     if (days >= 365) return (days / 365).toFixed(1) + 'y';
     return Math.max(0, Math.round(days)) + 'd';
   }
-  // The model in one function: the page recomputes a row from the snapshot figures and checks the
-  // number board.json carries, so the page's code and the board's data are visibly the same arithmetic.
-  function impliedOf(row, model) {
+
+  // The model in one function, mirroring lib/model.ts: clamp the seven-day change,
+  // turn it into a growth multiplier, age the row into a maturity multiplier, and
+  // price TVL at the row's category multiple. The detail drawer checks its result
+  // against board.json's number for the same row.
+  function recomputeImplied(row, model) {
     var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
     var growthMult = 1 + (growth / 100) * model.growth_weight;
     var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
@@ -36,6 +58,8 @@
     return Math.max(1, Math.round(row.tvl_usd * row.category_multiple * growthMult * maturity));
   }
 
+  // A tiny element builder: tag, attributes (class, text, html, on* handlers, or any
+  // setAttribute pair), then any number of child nodes, strings or arrays of nodes.
   function el(tag, attrs) {
     var node = document.createElement(tag);
     if (attrs) {
@@ -57,22 +81,24 @@
     return node;
   }
 
-  // The farm plan is the same derivation main.ts writes to board.json: category, chains, TVL and age
-  // decide the action, the capital, the hold and every cost and time. No name is special-cased.
-  function chainOf(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
-  function capitalFor(p) {
+  // The farm plan derivation, repeated from lib/model.ts so the page can show the
+  // plan for any row it renders: the category decides the two core actions, the
+  // chains decide where they happen, the TVL decides the position size, and the age
+  // decides the holding window. No protocol name is special-cased here either.
+  function firstChain(p) { return p.chains && p.chains.length > 0 ? p.chains[0] : 'its main chain'; }
+  function positionCapital(p) {
     if (p.tvl_usd >= 5e9) return 250;
     if (p.tvl_usd >= 1e9) return 150;
     if (p.tvl_usd >= 1e8) return 100;
     return 50;
   }
-  function holdDaysFor(age) {
+  function holdDays(age) {
     if (age === null || age === undefined) return 30;
     if (age < 180) return 60;
     if (age < 365) return 45;
     return 30;
   }
-  function actionFor(p, capital, chain) {
+  function openingAction(p, capital, chain) {
     var c = (p.category || '').toLowerCase();
     var name = p.name;
     if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0) return 'Supply $' + capital + ' of USDC to ' + name + ' on ' + chain + ' and keep the position open.';
@@ -87,13 +113,13 @@
     if (c.indexOf('insurance') >= 0) return 'Buy $' + capital + ' of cover from ' + name + ' on ' + chain + ' and keep the policy.';
     return 'Deposit $' + capital + ' of USDC into ' + name + ' on ' + chain + ' and keep the position open.';
   }
-  function stepText(step) {
+  function flattenStep(step) {
     var s = step.text + ' Cost: ' + step.cost + '. Time: ' + step.time + '.';
     if (s.length > 600) s = s.slice(0, 596) + '...';
     if (s.length < 20) s = s + " Hold the position and check the protocol's own page.";
     return s;
   }
-  function secondActionFor(p, chain) {
+  function secondAction(p, chain) {
     var c = (p.category || '').toLowerCase();
     var name = p.name;
     if (c.indexOf('lend') >= 0 || c.indexOf('cdp') >= 0 || c.indexOf('collateral') >= 0) return "Borrow a small amount against the supply, keep the health factor above 2, and repay it in full a week later so both sides of " + name + "'s market record the wallet.";
@@ -108,25 +134,27 @@
     if (c.indexOf('insurance') >= 0) return "Let the first cover period finish and renew it once, so the wallet records a full policy cycle on " + name + ".";
     return "Use " + name + "'s second main feature on " + chain + " once (a second deposit route, a vote or a claim), so the wallet is a user of the protocol and not a single deposit.";
   }
-  function farmSteps(p) {
-    var chain = chainOf(p);
-    var capital = capitalFor(p);
-    var hold = holdDaysFor(p.age_days);
+  function deriveFarmSteps(p) {
+    var chain = firstChain(p);
+    var capital = positionCapital(p);
+    var hold = holdDays(p.age_days);
     var actionGas = capital >= 150 ? 8 : 4;
     var weeks = Math.ceil(hold / 7);
     var totalGas = 3 + actionGas + 5 + 2 * weeks;
     var multiChain = p.chains && p.chains.length > 1 ? ' It also runs on ' + p.chains[1] + ', so keep the position on ' + chain + ' where the wallet started.' : '';
     return [
       { text: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.' + multiChain, cost: 'under $3 of gas for the first transaction', time: '5 minutes' },
-      { text: actionFor(p, capital, chain), cost: '$' + capital + ' of capital and about $' + actionGas + ' of gas', time: '15 minutes to set up' },
-      { text: secondActionFor(p, chain), cost: 'about $5 of gas', time: '15 minutes, in the first week' },
+      { text: openingAction(p, capital, chain), cost: '$' + capital + ' of capital and about $' + actionGas + ' of gas', time: '15 minutes to set up' },
+      { text: secondAction(p, chain), cost: 'about $5 of gas', time: '15 minutes, in the first week' },
       { text: 'Make one qualifying action each week, such as a deposit, a borrow, a swap or a vote.', cost: 'about $2 of gas a week', time: '10 minutes a week' },
       { text: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', cost: 'the $' + capital + ' stays in the position', time: hold + ' days' },
       { text: "Every Sunday, open the protocol's own points or rewards page, save the balance into a farm log with the wallet, the dates and every transaction, and claim only from a link the protocol itself publishes.", cost: 'no fee to check, and never pay to claim', time: '10 minutes a week' },
       { text: 'Review on day ' + hold + ': if no token, points programme or launch signal has appeared, withdraw the $' + capital + ' and move it to the next protocol on the board. The whole plan\'s gas budget is about $' + totalGas + ' over ' + weeks + ' weeks, on top of the $' + capital + ' position.', cost: 'about $' + totalGas + ' of gas in total if the plan runs its full course', time: hold + ' days, then a 20 minute review' }
-    ].map(stepText);
+    ].map(flattenStep);
   }
 
+  // The view state lives in the URL hash (q, category, w, p), so a search, a filter
+  // or an open protocol can be shared as a link and restored on load.
   function readHash() {
     var hash = window.location.hash.replace(/^#/, '');
     if (!hash) return;
@@ -147,6 +175,8 @@
     else window.history.replaceState(null, '', window.location.pathname + window.location.search);
   }
 
+  // Filtering and sorting are pure functions of the state: scope first, then
+  // category, then the search text over name, slug, category and chains.
   function rows() {
     var q = state.q.trim().toLowerCase();
     return DATA.rows.filter(function (r) {
@@ -360,6 +390,8 @@
     );
   }
 
+  // The detail drawer: one protocol's equation, its peer evidence, and its farm
+  // plan. It is a <dialog>, so Escape and the backdrop behave as readers expect.
   var dialog = el('dialog', { class: 'detail', id: 'detail', 'aria-labelledby': 'detail-title' });
   dialog.addEventListener('close', function () { state.selected = null; writeHash(); });
 
@@ -369,7 +401,7 @@
     state.selected = slug;
     writeHash();
     dialog.textContent = '';
-    var steps = farmSteps(row);
+    var steps = deriveFarmSteps(row);
     dialog.appendChild(el('div', { class: 'detail-head' },
       el('div', null,
         el('span', { class: 'brand-name', text: 'Rank ' + row.rank + ' of ' + DATA.board_size }),
@@ -392,7 +424,7 @@
       el('p', { class: 'sub', text: row.peer_count > 0
         ? 'Priced by peers: ' + row.peer_count + ' live-token protocol' + (row.peer_count === 1 ? '' : 's') + ' in ' + (row.category || 'this category') + ' set this row\'s launch multiple, shrunk toward the global peer median of x' + DATA.global_median_multiple + '. ' + (row.watchlist ? 'This row is on the watchlist (TVL at or above the floor, no token on record).' : 'This row is an early find below the watchlist floor.')
         : 'No live-token peer in ' + (row.category || 'this category') + ' prices this row, so it uses the global peer median of x' + DATA.global_median_multiple + '. ' + (row.watchlist ? 'This row is on the watchlist (TVL at or above the floor, no token on record).' : 'This row is an early find below the watchlist floor.') }),
-      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (impliedOf(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
+      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(recomputeImplied(row, DATA.model)) + (recomputeImplied(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
@@ -410,6 +442,8 @@
     }
   }
 
+  // One render pass rebuilds the whole shell from the current state; the board is
+  // small enough that this stays instant, and it keeps every control honest.
   function render() {
     app.textContent = '';
     var shell = el('div', { class: 'shell' });

@@ -1,18 +1,26 @@
-// A working token-radar-01 entry (Node 22, standard library only).
+// Token Radar's entrypoint (token-radar-01). Node 22, standard library only.
 //
-// The program reads the sealed snapshot from /input/snapshot.json (or --input <file|dir>), scores every
-// pre-token protocol with the model in lib/model.ts, writes the ranked board to /output/board.json, and
-// copies this repository's dashboard/ and screenshots/ to /output. Last, it writes /output/dossier.json,
-// the summary the judge reads, with the vendored make.fun library.
+// The run, end to end:
+//   1. Read the sealed snapshot from /input/snapshot.json (or --input <file|dir>).
+//   2. Score every pre-token protocol with the model in lib/model.ts (radar-2).
+//   3. Write the ranked board to /output/board.json and the dashboard's dataset to
+//      /output/data.js, from the same scored board, so the page and the board can
+//      never disagree.
+//   4. Copy this repository's dashboard/ and screenshots/ into /output.
+//   5. Write /output/dossier.json last, with the vendored make.fun library: the
+//      scorer rebuilds the dossier from this output and compares it byte for byte,
+//      so it must describe the finished output, not an intermediate one.
 //
-// The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
-// and dashboard/app.js read /output/data.js, which this program writes from the same board.
+// The dashboard is a static page - no framework, no network - made of
+// dashboard/index.html, dashboard/app.css and dashboard/app.js, all reading the
+// data.js written in step 3.
 //
-// Model radar-2: each pre-token protocol is priced by the live-token peers of its own category (the
-// median market-cap / TVL those peers trade at, shrunk toward the global median and clamped), then
-// adjusted for seven-day growth and for how long it has run with no token. The dashboard states the
-// formula, shows every category's peer evidence, and gives every protocol a seven-step farm plan
-// whose costs and times come from the protocol's own record.
+// The model in one paragraph: each pre-token protocol is priced by the live-token
+// peers of its own category (the median market-cap / TVL those peers trade at,
+// shrunk toward the global median by the peer count and clamped), then adjusted for
+// seven-day growth and for how long the protocol has run with no token. Every row
+// also carries a seven-step farm plan whose actions, costs and times come from the
+// protocol's own record. lib/model.ts documents the formula in full.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json
@@ -25,12 +33,12 @@ import { buildDossier } from './vendor/makefun-board.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 
-/** The scorer's own caps (reference/gate.json): the text cap shapes the bytes, the rest refuse. */
+/** The scorer's own caps (reference/gate.json): the text cap shapes the bytes; the rest refuse. */
 const TEXT_MAX_BYTES = 65_536;
 const SCREENSHOT_CAPS = { max: 4, max_bytes: 524_288 };
 const IMAGE_NAME = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$/;
 
-/** --name <value> out of the arguments, or the fallback. */
+/** The value of --name <value> among the arguments (or --name=<value>), else the fallback. */
 function arg(name: string, fallback: string): string {
   const at = process.argv.indexOf(`--${name}`);
   if (at >= 0 && at + 1 < process.argv.length) return process.argv[at + 1]!;
@@ -58,7 +66,7 @@ mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'board.json'), `${JSON.stringify({ rows: board })}\n`);
 writeFileSync(join(out, 'data.js'), dataScript(radar));
 
-/** Copy one directory's regular files into `to`, skipping names that start with a dot. */
+/** Copy one directory's regular files into `to`, skipping dotfiles; returns the names copied. */
 function copyFiles(from: string, to: string): string[] {
   if (!existsSync(from)) return [];
   mkdirSync(to, { recursive: true });
@@ -86,7 +94,8 @@ for (const name of shots) {
   }
 }
 
-// The dossier is written last: the scorer rebuilds it from this /output and compares bytes.
+// Written last, on purpose: the dossier summarises the finished /output, and the
+// scorer rebuilds it from that output and compares the bytes.
 writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEXT_MAX_BYTES, screenshots: SCREENSHOT_CAPS, dashboard: { max_files: 400, max_bytes: 4_194_304 } }));
 
 process.stdout.write(
